@@ -10,6 +10,11 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 
 	"omni-relay/configs"
+	accesskeyapp "omni-relay/internal/accesskey/application"
+	accesskeypostgres "omni-relay/internal/accesskey/infrastructure/postgres"
+	accesskeyredis "omni-relay/internal/accesskey/infrastructure/redis"
+	accesskeysecurity "omni-relay/internal/accesskey/infrastructure/security"
+	accesskeyhttp "omni-relay/internal/accesskey/interfaces/http"
 	identityapp "omni-relay/internal/identity/application"
 	identitypostgres "omni-relay/internal/identity/infrastructure/postgres"
 	identityredis "omni-relay/internal/identity/infrastructure/redis"
@@ -72,6 +77,16 @@ func New(ctx context.Context, cfg configs.Config, logger *slog.Logger) (*App, er
 		cfg.Session.TTL,
 		cfg.Session.CookieSecure,
 	)
+	accessKeyRepository := accesskeypostgres.NewRepository(postgres.DB)
+	credentialService := accesskeysecurity.NewCredentialService()
+	balanceStore := accesskeyredis.NewBalanceStore(redis)
+	accessKeyService := accesskeyapp.NewService(
+		accessKeyRepository,
+		userRepository,
+		credentialService,
+		balanceStore,
+	)
+	accessKeyHandler := accesskeyhttp.NewHandler(accessKeyService, identityService, logger)
 
 	return &App{
 		config:   cfg,
@@ -79,7 +94,13 @@ func New(ctx context.Context, cfg configs.Config, logger *slog.Logger) (*App, er
 		postgres: postgres,
 		redis:    redis,
 		kafka:    kafka,
-		server:   httpserver.New(cfg.HTTP, logger, dependencies, identityHandler.RegisterRoutes),
+		server: httpserver.New(
+			cfg.HTTP,
+			logger,
+			dependencies,
+			identityHandler.RegisterRoutes,
+			accessKeyHandler.RegisterRoutes,
+		),
 	}, nil
 }
 

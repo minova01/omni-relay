@@ -13,5 +13,6 @@ type PasswordService interface {
 
 type SessionStore interface {
 	Create(context.Context, int64, time.Duration) (string, error)
+	GetUserID(context.Context, string) (int64, error)
 	Delete(context.Context, string) error
 }

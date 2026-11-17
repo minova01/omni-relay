@@ -45,3 +45,18 @@ func (r *UserRepository) FindByUsername(ctx context.Context, username string) (d
 	}
 	return user, nil
 }
+
+func (r *UserRepository) FindByID(ctx context.Context, id int64) (domain.User, error) {
+	var user domain.User
+	err := r.db.WithContext(ctx).
+		Select("id", "username", "password_hash", "role", "status", "quota", "used_quota", "request_count", "created_at", "updated_at").
+		Where("id = ? AND deleted_at = 0", id).
+		First(&user).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return domain.User{}, domain.ErrUserNotFound
+	}
+	if err != nil {
+		return domain.User{}, fmt.Errorf("find user by id: %w", err)
+	}
+	return user, nil
+}

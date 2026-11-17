@@ -1,7 +1,6 @@
 package identityhttp
 
 import (
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -17,7 +16,7 @@ import (
 
 const (
 	maxRequestBodyBytes = 1 << 20
-	sessionCookieName   = "omni_session"
+	SessionCookieName   = "omni_session"
 )
 
 type Handler struct {
@@ -52,11 +51,11 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 	if err := httpserver.DecodeJSON(w, r, &request, maxRequestBodyBytes); err != nil {
 		switch invalidField(err) {
 		case "Username":
-			writeError(w, http.StatusBadRequest, "invalid_username", "用户名格式不正确")
+			httpserver.WriteError(w, http.StatusBadRequest, "invalid_username", "用户名格式不正确")
 		case "Password":
-			writeError(w, http.StatusBadRequest, "invalid_password", "密码长度必须为 8 到 72 字节")
+			httpserver.WriteError(w, http.StatusBadRequest, "invalid_password", "密码长度必须为 8 到 72 字节")
 		default:
-			writeError(w, http.StatusBadRequest, "invalid_request", "请求参数不正确")
+			httpserver.WriteError(w, http.StatusBadRequest, "invalid_request", "请求参数不正确")
 		}
 		return
 	}
@@ -65,20 +64,20 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, domain.ErrUsernameTaken):
-			writeError(w, http.StatusConflict, "username_taken", "用户名已存在")
+			httpserver.WriteError(w, http.StatusConflict, "username_taken", "用户名已存在")
 		default:
 			h.logError(r, "register user", err)
-			writeError(w, http.StatusInternalServerError, "internal_error", "服务暂时不可用")
+			httpserver.WriteError(w, http.StatusInternalServerError, "internal_error", "服务暂时不可用")
 		}
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"data": httpmodel.NewUserResponse(user)})
+	httpserver.WriteJSON(w, http.StatusCreated, map[string]any{"data": httpmodel.NewUserResponse(user)})
 }
 
 func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	var request httpmodel.CredentialsRequest
 	if err := httpserver.DecodeJSON(w, r, &request, maxRequestBodyBytes); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "请求参数不正确")
+		httpserver.WriteError(w, http.StatusBadRequest, "invalid_request", "请求参数不正确")
 		return
 	}
 
@@ -86,18 +85,18 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, domain.ErrInvalidCredential):
-			writeError(w, http.StatusUnauthorized, "invalid_credentials", "用户名或密码错误")
+			httpserver.WriteError(w, http.StatusUnauthorized, "invalid_credentials", "用户名或密码错误")
 		case errors.Is(err, domain.ErrUserDisabled):
-			writeError(w, http.StatusForbidden, "user_disabled", "用户已被禁用")
+			httpserver.WriteError(w, http.StatusForbidden, "user_disabled", "用户已被禁用")
 		default:
 			h.logError(r, "login user", err)
-			writeError(w, http.StatusInternalServerError, "internal_error", "服务暂时不可用")
+			httpserver.WriteError(w, http.StatusInternalServerError, "internal_error", "服务暂时不可用")
 		}
 		return
 	}
 
 	h.setSessionCookie(w, result.SessionToken)
-	writeJSON(w, http.StatusOK, map[string]any{"data": httpmodel.NewUserResponse(result.User)})
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"data": httpmodel.NewUserResponse(result.User)})
 }
 
 func invalidField(err error) string {
@@ -109,15 +108,15 @@ func invalidField(err error) string {
 }
 
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie(sessionCookieName)
+	cookie, err := r.Cookie(SessionCookieName)
 	if err != nil && !errors.Is(err, http.ErrNoCookie) {
-		writeError(w, http.StatusBadRequest, "invalid_session", "会话信息不正确")
+		httpserver.WriteError(w, http.StatusBadRequest, "invalid_session", "会话信息不正确")
 		return
 	}
 	if cookie != nil {
 		if err := h.service.Logout(r.Context(), cookie.Value); err != nil {
 			h.logError(r, "logout user", err)
-			writeError(w, http.StatusInternalServerError, "internal_error", "服务暂时不可用")
+			httpserver.WriteError(w, http.StatusInternalServerError, "internal_error", "服务暂时不可用")
 			return
 		}
 	}
@@ -127,7 +126,7 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) setSessionCookie(w http.ResponseWriter, token string) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookieName,
+		Name:     SessionCookieName,
 		Value:    token,
 		Path:     "/",
 		MaxAge:   int(h.sessionTTL.Seconds()),
@@ -139,7 +138,7 @@ func (h *Handler) setSessionCookie(w http.ResponseWriter, token string) {
 
 func (h *Handler) clearSessionCookie(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookieName,
+		Name:     SessionCookieName,
 		Value:    "",
 		Path:     "/",
 		MaxAge:   -1,
@@ -154,16 +153,4 @@ func (h *Handler) logError(r *http.Request, operation string, err error) {
 		"request_id", httpserver.RequestID(r.Context()),
 		"error", err,
 	)
-}
-
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(value)
-}
-
-func writeError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, map[string]any{
-		"error": map[string]string{"code": code, "message": message},
-	})
 }

@@ -80,3 +80,24 @@ func (s *Service) Logout(ctx context.Context, token string) error {
 	}
 	return s.sessions.Delete(ctx, token)
 }
+
+func (s *Service) AuthenticateSession(ctx context.Context, token string) (domain.User, error) {
+	if token == "" {
+		return domain.User{}, domain.ErrInvalidSession
+	}
+	userID, err := s.sessions.GetUserID(ctx, token)
+	if err != nil {
+		return domain.User{}, err
+	}
+	user, err := s.users.FindByID(ctx, userID)
+	if errors.Is(err, domain.ErrUserNotFound) {
+		return domain.User{}, domain.ErrInvalidSession
+	}
+	if err != nil {
+		return domain.User{}, err
+	}
+	if user.Status != domain.StatusEnabled {
+		return domain.User{}, domain.ErrUserDisabled
+	}
+	return user, nil
+}

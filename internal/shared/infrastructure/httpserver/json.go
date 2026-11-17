@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"strings"
 
 	"github.com/go-playground/validator/v10"
 )
@@ -22,6 +23,9 @@ func init() {
 	_ = requestValidator.RegisterValidation("password_bytes", func(field validator.FieldLevel) bool {
 		length := len([]byte(field.Field().String()))
 		return length >= 8 && length <= 72
+	})
+	_ = requestValidator.RegisterValidation("notblank", func(field validator.FieldLevel) bool {
+		return strings.TrimSpace(field.Field().String()) != ""
 	})
 }
 

@@ -17,13 +17,15 @@ func New(
 	cfg configs.HTTPConfig,
 	logger *slog.Logger,
 	dependencies []Dependency,
-	registerRoutes func(*http.ServeMux),
+	registerRoutes ...func(*http.ServeMux),
 ) *Server {
 	health := newHealthHandler(dependencies)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", health.live)
 	mux.HandleFunc("GET /health/ready", health.ready)
-	registerRoutes(mux)
+	for _, register := range registerRoutes {
+		register(mux)
+	}
 
 	return &Server{http: &http.Server{
 		Addr:         cfg.Address,
