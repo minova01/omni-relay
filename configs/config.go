@@ -18,6 +18,7 @@ type Config struct {
 	Postgres PostgresConfig
 	Redis    RedisConfig
 	Kafka    KafkaConfig
+	Identity IdentityConfig
 	Session  SessionConfig
 	Secret   SecretConfig
 	Upstream UpstreamConfig
@@ -60,6 +61,10 @@ type KafkaConfig struct {
 type SessionConfig struct {
 	TTL          time.Duration
 	CookieSecure bool
+}
+
+type IdentityConfig struct {
+	NewUserInitialQuota int64
 }
 
 type SecretConfig struct {
@@ -116,6 +121,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	newUserInitialQuota, err := int64Value("NEW_USER_INITIAL_QUOTA", 0, 0, 1<<62)
+	if err != nil {
+		return Config{}, err
+	}
 	upstreamTimeout, err := durationMS("UPSTREAM_TIMEOUT_MS", 120_000)
 	if err != nil {
 		return Config{}, err
@@ -157,8 +166,9 @@ func Load() (Config, error) {
 			SASLUsername:  os.Getenv("KAFKA_SASL_USERNAME"),
 			SASLPassword:  os.Getenv("KAFKA_SASL_PASSWORD"),
 		},
-		Session: SessionConfig{TTL: sessionTTL, CookieSecure: cookieSecure},
-		Secret:  SecretConfig{EncryptionKey: encryptionKey},
+		Identity: IdentityConfig{NewUserInitialQuota: newUserInitialQuota},
+		Session:  SessionConfig{TTL: sessionTTL, CookieSecure: cookieSecure},
+		Secret:   SecretConfig{EncryptionKey: encryptionKey},
 		Upstream: UpstreamConfig{
 			Timeout:      upstreamTimeout,
 			MaxBodyBytes: maxBodyBytes,

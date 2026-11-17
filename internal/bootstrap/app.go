@@ -6,11 +6,15 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	redisclient "github.com/redis/go-redis/v9"
 	"github.com/twmb/franz-go/pkg/kgo"
 
 	"omni-relay/configs"
+	identityapp "omni-relay/internal/identity/application"
+	identitypostgres "omni-relay/internal/identity/infrastructure/postgres"
+	identityredis "omni-relay/internal/identity/infrastructure/redis"
+	"omni-relay/internal/identity/infrastructure/security"
+	identityhttp "omni-relay/internal/identity/interfaces/http"
 	"omni-relay/internal/shared/infrastructure/database"
 	"omni-relay/internal/shared/infrastructure/httpserver"
 	kafkastore "omni-relay/internal/shared/infrastructure/kafka"
@@ -20,7 +24,7 @@ import (
 type App struct {
 	config   configs.Config
 	logger   *slog.Logger
-	postgres *pgxpool.Pool
+	postgres *database.Client
 	redis    *redisclient.Client
 	kafka    *kgo.Client
 	server   *httpserver.Server
@@ -34,14 +38,14 @@ func New(ctx context.Context, cfg configs.Config, logger *slog.Logger) (*App, er
 
 	redis, err := redisstore.Open(ctx, cfg.Redis)
 	if err != nil {
-		postgres.Close()
+		_ = postgres.Close()
 		return nil, err
 	}
 
 	kafka, err := kafkastore.Open(ctx, cfg.Kafka)
 	if err != nil {
 		_ = redis.Close()
-		postgres.Close()
+		_ = postgres.Close()
 		return nil, err
 	}
 
@@ -52,6 +56,22 @@ func New(ctx context.Context, cfg configs.Config, logger *slog.Logger) (*App, er
 		}},
 		{Name: "kafka", Check: kafka.Ping},
 	}
+	userRepository := identitypostgres.NewUserRepository(postgres.DB)
+	sessionStore := identityredis.NewSessionStore(redis)
+	passwordService := security.NewPasswordService()
+	identityService := identityapp.NewService(
+		userRepository,
+		passwordService,
+		sessionStore,
+		cfg.Identity.NewUserInitialQuota,
+		cfg.Session.TTL,
+	)
+	identityHandler := identityhttp.NewHandler(
+		identityService,
+		logger,
+		cfg.Session.TTL,
+		cfg.Session.CookieSecure,
+	)
 
 	return &App{
 		config:   cfg,
@@ -59,7 +79,7 @@ func New(ctx context.Context, cfg configs.Config, logger *slog.Logger) (*App, er
 		postgres: postgres,
 		redis:    redis,
 		kafka:    kafka,
-		server:   httpserver.New(cfg.HTTP, logger, dependencies),
+		server:   httpserver.New(cfg.HTTP, logger, dependencies, identityHandler.RegisterRoutes),
 	}, nil
 }
 
@@ -100,7 +120,9 @@ func (a *App) Close() {
 	if err := a.redis.Close(); err != nil {
 		a.logger.Error("close redis", "error", err)
 	}
-	a.postgres.Close()
+	if err := a.postgres.Close(); err != nil {
+		a.logger.Error("close postgres", "error", err)
+	}
 }
 
 func errorsFromTimeout(timeout time.Duration) error {

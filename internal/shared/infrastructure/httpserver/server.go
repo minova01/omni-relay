@@ -13,11 +13,17 @@ type Server struct {
 	http *http.Server
 }
 
-func New(cfg configs.HTTPConfig, logger *slog.Logger, dependencies []Dependency) *Server {
+func New(
+	cfg configs.HTTPConfig,
+	logger *slog.Logger,
+	dependencies []Dependency,
+	registerRoutes func(*http.ServeMux),
+) *Server {
 	health := newHealthHandler(dependencies)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", health.live)
 	mux.HandleFunc("GET /health/ready", health.ready)
+	registerRoutes(mux)
 
 	return &Server{http: &http.Server{
 		Addr:         cfg.Address,

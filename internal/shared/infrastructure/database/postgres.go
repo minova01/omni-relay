@@ -2,27 +2,48 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 
 	"omni-relay/configs"
 )
 
-func Open(ctx context.Context, cfg configs.PostgresConfig) (*pgxpool.Pool, error) {
-	poolConfig, err := pgxpool.ParseConfig(cfg.DSN)
-	if err != nil {
-		return nil, fmt.Errorf("parse postgres config: %w", err)
-	}
-	poolConfig.MaxConns = cfg.MaxConns
+type Client struct {
+	DB    *gorm.DB
+	sqlDB *sql.DB
+}
 
-	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
+func Open(ctx context.Context, cfg configs.PostgresConfig) (*Client, error) {
+	db, err := gorm.Open(postgres.Open(cfg.DSN), &gorm.Config{
+		TranslateError: true,
+		Logger:         logger.Default.LogMode(logger.Silent),
+	})
 	if err != nil {
-		return nil, fmt.Errorf("create postgres pool: %w", err)
+		return nil, fmt.Errorf("open postgres: %w", err)
 	}
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, fmt.Errorf("get postgres connection pool: %w", err)
+	}
+	sqlDB.SetMaxOpenConns(int(cfg.MaxConns))
+	sqlDB.SetMaxIdleConns(int(cfg.MaxConns))
+
+	if err := sqlDB.PingContext(ctx); err != nil {
+		_ = sqlDB.Close()
 		return nil, fmt.Errorf("ping postgres: %w", err)
 	}
-	return pool, nil
+	return &Client{DB: db, sqlDB: sqlDB}, nil
+}
+
+func (c *Client) Ping(ctx context.Context) error {
+	return c.sqlDB.PingContext(ctx)
+}
+
+func (c *Client) Close() error {
+	return c.sqlDB.Close()
 }
