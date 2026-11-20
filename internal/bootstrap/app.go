@@ -15,6 +15,9 @@ import (
 	accesskeyredis "omni-relay/internal/accesskey/infrastructure/redis"
 	accesskeysecurity "omni-relay/internal/accesskey/infrastructure/security"
 	accesskeyhttp "omni-relay/internal/accesskey/interfaces/http"
+	catalogapp "omni-relay/internal/catalog/application"
+	catalogpostgres "omni-relay/internal/catalog/infrastructure/postgres"
+	cataloghttp "omni-relay/internal/catalog/interfaces/http"
 	identityapp "omni-relay/internal/identity/application"
 	identitypostgres "omni-relay/internal/identity/infrastructure/postgres"
 	identityredis "omni-relay/internal/identity/infrastructure/redis"
@@ -24,6 +27,7 @@ import (
 	"omni-relay/internal/shared/infrastructure/httpserver"
 	kafkastore "omni-relay/internal/shared/infrastructure/kafka"
 	redisstore "omni-relay/internal/shared/infrastructure/redis"
+	"omni-relay/internal/shared/infrastructure/secret"
 )
 
 type App struct {
@@ -87,6 +91,16 @@ func New(ctx context.Context, cfg configs.Config, logger *slog.Logger) (*App, er
 		balanceStore,
 	)
 	accessKeyHandler := accesskeyhttp.NewHandler(accessKeyService, identityService, logger)
+	secretCipher, err := secret.NewCipher(cfg.Secret.EncryptionKey)
+	if err != nil {
+		kafka.Close()
+		_ = redis.Close()
+		_ = postgres.Close()
+		return nil, err
+	}
+	catalogRepository := catalogpostgres.NewRepository(postgres.DB)
+	catalogService := catalogapp.NewService(catalogRepository, secretCipher, cfg.Upstream.AllowHTTP)
+	catalogHandler := cataloghttp.NewHandler(catalogService, identityService, logger)
 
 	return &App{
 		config:   cfg,
@@ -100,6 +114,7 @@ func New(ctx context.Context, cfg configs.Config, logger *slog.Logger) (*App, er
 			dependencies,
 			identityHandler.RegisterRoutes,
 			accessKeyHandler.RegisterRoutes,
+			catalogHandler.RegisterRoutes,
 		),
 	}, nil
 }

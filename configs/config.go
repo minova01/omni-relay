@@ -74,6 +74,7 @@ type SecretConfig struct {
 type UpstreamConfig struct {
 	Timeout      time.Duration
 	MaxBodyBytes int64
+	AllowHTTP    bool
 }
 
 func Load() (Config, error) {
@@ -133,6 +134,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	allowHTTP, err := boolValue("UPSTREAM_ALLOW_HTTP", false)
+	if err != nil {
+		return Config{}, err
+	}
 	encryptionKey, err := encryptionKey()
 	if err != nil {
 		return Config{}, err
@@ -172,6 +177,7 @@ func Load() (Config, error) {
 		Upstream: UpstreamConfig{
 			Timeout:      upstreamTimeout,
 			MaxBodyBytes: maxBodyBytes,
+			AllowHTTP:    allowHTTP,
 		},
 	}
 

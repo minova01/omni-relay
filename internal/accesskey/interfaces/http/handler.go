@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"omni-relay/internal/accesskey/application"
@@ -32,10 +31,10 @@ func NewHandler(service *application.Service, identity *identityapp.Service, log
 }
 
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.Handle("POST /api/v1/", h.requireSession(http.HandlerFunc(h.create)))
+	mux.Handle("POST /api/v1/api-keys", h.requireSession(http.HandlerFunc(h.create)))
 	mux.Handle("GET /api/v1/api-keys", h.requireSession(http.HandlerFunc(h.list)))
-	mux.Handle("POST /api/v1/api-keys/{id}/status", h.requireSession(http.HandlerFunc(h.updateStatus)))
-	mux.Handle("POST /api/v1/api-keys/{id}/delete", h.requireSession(http.HandlerFunc(h.delete)))
+	mux.Handle("POST /api/v1/api-keys/status", h.requireSession(http.HandlerFunc(h.updateStatus)))
+	mux.Handle("POST /api/v1/api-keys/delete", h.requireSession(http.HandlerFunc(h.delete)))
 }
 
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
@@ -68,17 +67,13 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) updateStatus(w http.ResponseWriter, r *http.Request) {
-	keyID, ok := pathID(w, r)
-	if !ok {
-		return
-	}
 	var request httpmodel.UpdateAPIKeyStatusRequest
 	if err := httpserver.DecodeJSON(w, r, &request, maxRequestBodyBytes); err != nil {
 		httpserver.WriteError(w, http.StatusBadRequest, "invalid_request", "请求参数不正确")
 		return
 	}
 	user := sessionUser(r.Context())
-	if err := h.service.UpdateStatus(r.Context(), user.ID, keyID, domain.Status(request.Status)); err != nil {
+	if err := h.service.UpdateStatus(r.Context(), user.ID, request.ID, domain.Status(request.Status)); err != nil {
 		h.writeMutationError(w, r, "update api key status", err)
 		return
 	}
@@ -86,12 +81,13 @@ func (h *Handler) updateStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
-	keyID, ok := pathID(w, r)
-	if !ok {
+	var request httpmodel.DeleteAPIKeyRequest
+	if err := httpserver.DecodeJSON(w, r, &request, maxRequestBodyBytes); err != nil {
+		httpserver.WriteError(w, http.StatusBadRequest, "invalid_request", "请求参数不正确")
 		return
 	}
 	user := sessionUser(r.Context())
-	if err := h.service.Delete(r.Context(), user.ID, keyID); err != nil {
+	if err := h.service.Delete(r.Context(), user.ID, request.ID); err != nil {
 		h.writeMutationError(w, r, "delete api key", err)
 		return
 	}
@@ -162,15 +158,6 @@ func (h *Handler) logError(r *http.Request, operation string, err error) {
 		"request_id", httpserver.RequestID(r.Context()),
 		"error", err,
 	)
-}
-
-func pathID(w http.ResponseWriter, r *http.Request) (int64, bool) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil || id <= 0 {
-		httpserver.WriteError(w, http.StatusBadRequest, "invalid_id", "API Key ID 不正确")
-		return 0, false
-	}
-	return id, true
 }
 
 func bearerToken(header string) (string, bool) {
