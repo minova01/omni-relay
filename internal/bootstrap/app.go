@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"time"
 
 	redisclient "github.com/redis/go-redis/v9"
@@ -23,6 +24,8 @@ import (
 	identityredis "omni-relay/internal/identity/infrastructure/redis"
 	"omni-relay/internal/identity/infrastructure/security"
 	identityhttp "omni-relay/internal/identity/interfaces/http"
+	relaypostgres "omni-relay/internal/relay/infrastructure/postgres"
+	relayhttp "omni-relay/internal/relay/interfaces/http"
 	"omni-relay/internal/shared/infrastructure/database"
 	"omni-relay/internal/shared/infrastructure/httpserver"
 	kafkastore "omni-relay/internal/shared/infrastructure/kafka"
@@ -101,6 +104,7 @@ func New(ctx context.Context, cfg configs.Config, logger *slog.Logger) (*App, er
 	catalogRepository := catalogpostgres.NewRepository(postgres.DB)
 	catalogService := catalogapp.NewService(catalogRepository, secretCipher, cfg.Upstream.AllowHTTP)
 	catalogHandler := cataloghttp.NewHandler(catalogService, identityService, logger)
+	relayHandler := relayhttp.NewHandler(relaypostgres.NewRepository(postgres.DB), secretCipher, cfg.Upstream.Timeout, cfg.Upstream.MaxBodyBytes, logger)
 
 	return &App{
 		config:   cfg,
@@ -115,6 +119,7 @@ func New(ctx context.Context, cfg configs.Config, logger *slog.Logger) (*App, er
 			identityHandler.RegisterRoutes,
 			accessKeyHandler.RegisterRoutes,
 			catalogHandler.RegisterRoutes,
+			func(mux *http.ServeMux) { relayHandler.RegisterRoutes(mux, accessKeyHandler) },
 		),
 	}, nil
 }
