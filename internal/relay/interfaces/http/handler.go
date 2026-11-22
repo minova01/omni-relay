@@ -35,8 +35,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, keys *accesskeyhttp.Handler
 }
 func (h *Handler) chat(w http.ResponseWriter, r *http.Request) {
 	var input model.ChatRequest
-	if err := httpserver.DecodeJSON(w, r, &input, h.maxBody); err != nil || input.Stream {
-		httpserver.WriteError(w, http.StatusBadRequest, "invalid_request", "请求参数不正确或尚不支持流式响应")
+	if err := httpserver.DecodeJSON(w, r, &input, h.maxBody); err != nil {
+		httpserver.WriteError(w, http.StatusBadRequest, "invalid_request", "请求参数不正确")
 		return
 	}
 	if !validStop(input.Stop) {
@@ -56,12 +56,19 @@ func (h *Handler) chat(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, errors.New("unsupported channel type"))
 		return
 	}
+	if input.Stream && !route.Mapping.SupportsStream {
+		httpserver.WriteError(w, http.StatusBadRequest, "stream_unsupported", "当前模型渠道不支持流式响应")
+		return
+	}
 	credential, err := h.cipher.Decrypt(route.Channel.SecretCiphertext)
 	if err != nil {
 		h.fail(w, r, err)
 		return
 	}
 	input.Model = route.Mapping.UpstreamModel
+	if input.Stream {
+		input.StreamOptions = &model.StreamOptions{IncludeUsage: true}
+	}
 	body, err := json.Marshal(input)
 	if err != nil {
 		h.fail(w, r, err)
@@ -94,6 +101,10 @@ func (h *Handler) chat(w http.ResponseWriter, r *http.Request) {
 			status = http.StatusTooManyRequests
 		}
 		httpserver.WriteError(w, status, "upstream_error", "上游服务调用失败")
+		return
+	}
+	if input.Stream {
+		h.stream(w, r, response)
 		return
 	}
 	limited := io.LimitReader(response.Body, h.maxBody+1)
